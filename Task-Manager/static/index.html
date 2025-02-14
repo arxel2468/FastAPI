@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow">
+        <h1 class="text-2xl font-bold mb-4">Task Manager</h1>
+
+        <form id="taskForm" class="mb-4">
+            <input type="text" id="title" placeholder="Task Title" class="border p-2 w-full mb-2">
+            <input type="text" id="description" placeholder="Task Description" class="border p-2 w-full mb-2">
+            <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Add Task</button>
+        </form>
+
+        <ul id="taskList" class="space-y-2"></ul>
+    </div>
+
+    <script>
+        const taskForm = document.getElementById("taskForm");
+        const taskList = document.getElementById("taskList");
+
+        async function fetchTasks() {
+            const response = await fetch("/tasks/");
+            const tasks = await response.json();
+            taskList.innerHTML = "";
+            tasks.forEach(task => {
+                const li = document.createElement("li");
+                li.className = "p-2 bg-gray-200 flex justify-between items-center rounded";
+                li.innerHTML = `
+                    <span>${task.title} - ${task.description}</span>
+                    <button onclick="deleteTask(${task.id})" class="bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+                `;
+                taskList.appendChild(li);
+            });
+        }
+
+        taskForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const title = document.getElementById("title").value;
+            const description = document.getElementById("description").value;
+            await fetch("/tasks/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, description })
+            });
+            fetchTasks();
+        });
+
+        async function deleteTask(id) {
+            await fetch(`/tasks/${id}`, { method: "DELETE" });
+            fetchTasks();
+        }
+
+        fetchTasks();
+    </script>
+</body>
+</html>
