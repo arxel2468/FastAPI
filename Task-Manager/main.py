@@ -46,7 +46,7 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
 
 
 from fastapi.staticfiles import StaticFiles
-
+from fastapi.responses import FileResponse
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
