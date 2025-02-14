@@ -1,20 +1,22 @@
 import os
+import dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base
 from groq import Groq
 
-# Set up Groq API Key
-os.environ["GROQ_API_KEY"] = "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"
+# Load environment variables
+dotenv.load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Initialize FastAPI
+# Initialize FastAPI app
 app = FastAPI()
 
-# Groq API client
-groq_client = Groq()
+# Groq API Client
+groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Database setup (SQLite for simplicity)
+# Database setup (SQLite)
 DATABASE_URL = "sqlite:///./chat.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
@@ -34,6 +36,7 @@ class ChatMessage(Base):
     message = Column(String)
     sender = Column(String)  # "user" or "ai"
 
+# Create tables
 Base.metadata.create_all(bind=engine)
 
 # Serve frontend
@@ -41,7 +44,7 @@ Base.metadata.create_all(bind=engine)
 def serve_home():
     return FileResponse("static/index.html")
 
-# WebSocket connections
+# Store connected users
 connected_users = {}
 
 @app.websocket("/ws/{username}")
@@ -61,30 +64,31 @@ async def chat_websocket(websocket: WebSocket, username: str):
         while True:
             user_message = await websocket.receive_text()
 
-            # Store user message
+            # Store user message in DB
             db.add(ChatMessage(user_id=user.id, message=user_message, sender="user"))
             db.commit()
 
-            # Get AI response
+            # Get AI response (streaming in chunks)
             completion = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": user_message}],
-                temperature=1,
-                max_completion_tokens=1024,
+                temperature=0.7,
+                max_completion_tokens=50,  # Shorter responses for conversation-like flow
                 top_p=1,
                 stream=True,
                 stop=None,
             )
 
             ai_response = ""
-            for chunk in completion:
-                ai_response += chunk.choices[0].delta.content or ""
+            async for chunk in completion:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    ai_response += delta
+                    await websocket.send_text(delta)  # Send AI response in small parts
 
-            # Store AI response
+            # Store AI response in DB
             db.add(ChatMessage(user_id=user.id, message=ai_response, sender="ai"))
             db.commit()
-
-            await websocket.send_text(ai_response)
 
     except WebSocketDisconnect:
         del connected_users[username]
