@@ -19,7 +19,7 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 # Database setup (SQLite)
 DATABASE_URL = "sqlite:///./chat.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
 # User Model
@@ -53,14 +53,14 @@ async def chat_websocket(websocket: WebSocket, username: str):
     connected_users[username] = websocket
     db = SessionLocal()
 
-    # Ensure user exists
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        user = User(username=username)
-        db.add(user)
-        db.commit()
-
     try:
+        # Ensure user exists
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            user = User(username=username)
+            db.add(user)
+            db.commit()
+
         while True:
             user_message = await websocket.receive_text()
 
@@ -68,23 +68,21 @@ async def chat_websocket(websocket: WebSocket, username: str):
             db.add(ChatMessage(user_id=user.id, message=user_message, sender="user"))
             db.commit()
 
-            # Get AI response (streaming in chunks)
+            # Get AI response
             completion = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": user_message}],
+                messages=[{"role": "system", "content": "Respond concisely and avoid excessive details."},
+                    {"role": "user", "content": user_message}],
                 temperature=0.7,
-                max_completion_tokens=50,  # Shorter responses for conversation-like flow
+                max_completion_tokens=150,
                 top_p=1,
-                stream=True,
-                stop=None,
+                stream=False,  # TURN OFF STREAMING
             )
 
-            ai_response = ""
-            async for chunk in completion:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    ai_response += delta
-                    await websocket.send_text(delta)  # Send AI response in small parts
+            ai_response = completion.choices[0].message.content
+
+
+            await websocket.send_text(ai_response)  # Send full response at once
 
             # Store AI response in DB
             db.add(ChatMessage(user_id=user.id, message=ai_response, sender="ai"))
@@ -93,3 +91,5 @@ async def chat_websocket(websocket: WebSocket, username: str):
     except WebSocketDisconnect:
         del connected_users[username]
         await websocket.close()
+    finally:
+        db.close()
